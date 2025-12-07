@@ -444,6 +444,9 @@ const AdminReports: React.FC = () => {
               });
             }
 
+            // determine display time for this team: arrival_time or event start_time
+            const displayTimeForTeam = (nt && (nt.arrival_time || nt.arrivalTime)) || ev?.start_time || null;
+
             // build a card-like container using a two-column table: small colored stripe + content
             const cardTable = {
               table: {
@@ -453,7 +456,7 @@ const AdminReports: React.FC = () => {
                     { text: '', fillColor: accentColor, margin: [0, 0, 0, 0], border: [false, false, false, false] },
                     {
                       stack: [
-                        { columns: [{ width: '*', stack: [{ text: `Equipe: ${nt.name || nt.team_name || '-'}`, style: 'teamCardTitle', color: (accentColor === '#111827' || accentColor === '#000000') ? '#FFFFFF' : '#111827' }] }, { width: 'auto', text: `${orderedMembers.length} voluntários`, style: 'teamCardMeta', alignment: 'right', color: (accentColor === '#111827' || accentColor === '#000000') ? '#FFFFFF' : '#6B7280' }], margin: [6, 4, 6, 4] },
+                        { columns: [{ width: '*', stack: [{ text: `Equipe: ${nt.name || nt.team_name || '-'}`, style: 'teamCardTitle', color: (accentColor === '#111827' || accentColor === '#000000') ? '#FFFFFF' : '#111827' }] }, { width: 'auto', text: `${orderedMembers.length} voluntários${displayTimeForTeam ? ` · Chegada: ${formatTime(displayTimeForTeam)}` : ''}`, style: 'teamCardMeta', alignment: 'right', color: (accentColor === '#111827' || accentColor === '#000000') ? '#FFFFFF' : '#6B7280' }], margin: [6, 4, 6, 4] },
                         { stack: memberItems }
                       ],
                       fillColor: '#ffffff'
@@ -606,13 +609,17 @@ const AdminReports: React.FC = () => {
           </select>
           <label className="inline-flex items-center space-x-2">
             <input
-              aria-label="Marcar todos os eventos"
+              aria-label="Marcar todas as equipes visíveis"
               type="checkbox"
-              checked={displayedEvents.length > 0 && displayedEvents.every((ev: any) => selectedEventIds.includes(ev.id))}
+              // checked when all visible teams are selected
+              checked={(() => {
+                const allTeamIds: string[] = ([] as any[]).concat(...displayedEvents.map((ev: any) => (getTeamsForEvent(ev) || []).map(normalizeTeam).filter((nt: any) => !!nt).map((nt: any) => String(nt.id || nt.team_id || nt.teamId || '')))).filter(Boolean);
+                return allTeamIds.length > 0 && allTeamIds.every(id => selectedTeamIds.includes(id));
+              })()}
               onChange={() => {
-                const allIds = displayedEvents.map((ev: any) => ev.id).filter(Boolean);
-                const currentlyAll = displayedEvents.length > 0 && displayedEvents.every((ev: any) => selectedEventIds.includes(ev.id));
-                setSelectedEventIds(currentlyAll ? [] : allIds);
+                const allTeamIds: string[] = ([] as any[]).concat(...displayedEvents.map((ev: any) => (getTeamsForEvent(ev) || []).map(normalizeTeam).filter((nt: any) => !!nt).map((nt: any) => String(nt.id || nt.team_id || nt.teamId || '')))).filter(Boolean);
+                const currentlyAll = allTeamIds.length > 0 && allTeamIds.every(id => selectedTeamIds.includes(id));
+                setSelectedTeamIds(currentlyAll ? [] : allTeamIds);
               }}
               className="form-checkbox h-4 w-4 text-blue-600"
             />
