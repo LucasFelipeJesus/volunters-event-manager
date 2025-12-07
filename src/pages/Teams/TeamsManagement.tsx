@@ -29,6 +29,8 @@ interface Team {
         event_date: string
         location: string
         status: string
+        start_time?: string
+        end_time?: string
     }
     captain: {
         id: string
@@ -66,7 +68,7 @@ export const TeamsManagement: React.FC = () => {
                 .from('teams')
                 .select(`
           *,
-          event:events(id, title, event_date, location, status),
+          event:events(id, title, event_date, location, status, start_time, end_time),
           captain:users!teams_captain_id_fkey(id, full_name, email),
           members:team_members(
             id,
@@ -371,12 +373,16 @@ export const TeamsManagement: React.FC = () => {
                                                 <Users className="w-4 h-4" />
                                                 <span>{(team.members || []).filter((m: any) => m.status === 'active' || m.status === 'confirmed').length}/{team.max_volunteers} membros</span>
                                             </div>
-                                            {team.arrival_time && (
-                                                <div className="flex items-center space-x-1">
-                                                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                                                    <span>Chegada: {String(team.arrival_time).slice(0, 5)}</span>
-                                                </div>
-                                            )}
+                                            {(() => {
+                                                const formatTime = (t?: string | null) => t ? String(t).slice(0, 5) : ''
+                                                const displayTime = team.arrival_time || team.event?.start_time || null
+                                                return displayTime ? (
+                                                    <div className="flex items-center space-x-1">
+                                                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                                                        <span>Chegada: {formatTime(displayTime)}</span>
+                                                    </div>
+                                                ) : null
+                                            })()}
                                         </div>
 
                                         {/* Membros da equipe (apenas ativos) */}

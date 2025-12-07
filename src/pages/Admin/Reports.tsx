@@ -49,6 +49,9 @@ const AdminReports: React.FC = () => {
   const [eventStatusFilter, setEventStatusFilter] = useState<string>('all');
   const [teamDetailsByEvent, setTeamDetailsByEvent] = useState<Record<string, any[]>>({});
 
+  // Helper para formatar horário `HH:MM` (usa arrival_time ou start_time)
+  const formatTime = (t?: string | null) => (t ? String(t).slice(0, 5) : '');
+
   const getTeamsForEvent = (ev: any) => {
     if (!ev) return [];
     const evTeamsRaw: any[] = (ev as any).teams || [];
@@ -172,6 +175,8 @@ const AdminReports: React.FC = () => {
     const targetEvents = (selectedEventIds && selectedEventIds.length > 0)
       ? events.filter(e => selectedEventIds.includes(e.id))
       : (selectedEventId ? events.filter(e => e.id === selectedEventId) : events);
+
+    const formatTime = (t?: string | null) => t ? String(t).slice(0, 5) : ''
 
     // helper to fetch image and convert to dataURL (cached)
     const placeholderKey = '/placeholder-avatar.png';
@@ -647,7 +652,7 @@ const AdminReports: React.FC = () => {
                         <div>
                           <div className="text-xs text-gray-500">{event?.title}</div>
                           <div className="font-medium">{team.name || team.team_name || 'Equipe sem nome'}</div>
-                          <div className="text-sm text-gray-600">Voluntários: {ordered.length} {team.arrival_time ? `· Chegada: ${String(team.arrival_time).slice(0, 5)}` : ''}</div>
+                          <div className="text-sm text-gray-600">Voluntários: {ordered.length} {(team.arrival_time || event?.start_time) ? `· Chegada: ${formatTime(team.arrival_time || event?.start_time)}` : ''}</div>
                         </div>
                         <div>
                           <label className="inline-flex items-center space-x-2">
