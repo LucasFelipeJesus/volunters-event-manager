@@ -2,6 +2,7 @@
 import { supabase } from './supabase';
 import { logSupabaseError, SuccessMessages } from './errorHandling';
 import logger from './logger'
+import { demoteCaptain as adminDemoteCaptain, deactivateUser as adminDeactivateUser } from '../utils/adminUtils'
 import type { PostgrestError } from '@supabase/supabase-js'
 import type {
     User,
@@ -295,28 +296,25 @@ export const userService = {
     // Demover usuário de capitão para voluntário
     async demoteToVolunteer(userId: string): Promise<boolean> {
         try {
-            const { data, error } = await supabase
-                .from('users')
-                .update({ role: 'volunteer' })
-                .eq('id', userId)
-                .eq('role', 'captain')
-                .select()
-
-            if (error) {
-                logger.error('Erro ao demover usuário:', {
-                    userId,
-                    code: error.code,
-                    message: error.message
-                })
-                return false
+            // Primeiro tentar RPC server-side seguro, se houver
+            try {
+                const { data: rpcData, error: rpcErr } = await supabase.rpc('demote_captain', { user_id_param: userId }) as any
+                if (!rpcErr && rpcData !== undefined) {
+                    logger.info('Usuário demovido via RPC:', userId)
+                    return true
+                }
+                if (rpcErr) logger.warn('RPC demote_captain não disponível ou retornou erro, usando fallback:', rpcErr)
+            } catch (rpcErr) {
+                logger.warn('Chamada RPC demote_captain falhou, usando fallback:', rpcErr)
             }
 
-            if (!data || data.length === 0) {
-                logger.error('Usuário não encontrado ou não é capitão:', userId)
+            // Fallback: usar utilitário administrativo que aplica mudanças em team_members e teams
+            const ok = await adminDemoteCaptain(userId)
+            if (!ok) {
+                logger.error('adminDemoteCaptain retornou falso para userId:', userId)
                 return false
             }
-
-            logger.info('Usuário demovido a voluntário com sucesso:', userId)
+            logger.info('Usuário demovido com sucesso via adminDemoteCaptain:', userId)
             return true
         } catch (error) {
             logger.error('Erro inesperado ao demover usuário:', error)
@@ -397,50 +395,13 @@ export const userService = {
             } catch (rpcCallErr) {
                 logger.warn('RPC deactivate_user_and_cancel_registrations não disponível, executando fallback:', rpcCallErr)
             }
-
-            // Fallback: cancelar inscrições do usuário (pending/confirmed -> cancelled)
-            const { error: regErr } = await supabase
-                .from('event_registrations')
-                .update({ status: 'cancelled' })
-                .in('status', ['pending', 'confirmed'])
-                .eq('user_id', userId)
-
-            if (regErr) {
-                logger.error('Erro ao cancelar inscrições do usuário (fallback):', regErr)
-                // Não abortar imediatamente: tentar ao menos marcar o usuário como inativo
-            } else {
-                logger.info('Inscrições do usuário atualizadas para cancelled (quando aplicável)')
-            }
-
-            // Fallback adicional: remover usuário de equipes ativas (marcar removed)
-            try {
-                const { error: tmErr } = await supabase
-                    .from('team_members')
-                    .update({ status: 'removed', left_at: new Date().toISOString() })
-                    .eq('user_id', userId)
-                    .eq('status', 'active')
-
-                if (tmErr) {
-                    logger.error('Erro ao remover usuário de equipes (fallback):', tmErr)
-                } else {
-                    logger.info('Usuário removido de equipes ativas (fallback) quando aplicável')
-                }
-            } catch (tmCatch) {
-                logger.warn('Erro inesperado ao tentar remover usuário de equipes (fallback):', tmCatch)
-            }
-
-            // Marcar usuário como inativo
-            const { error: userErr } = await supabase
-                .from('users')
-                .update({ is_active: false })
-                .eq('id', userId)
-
-            if (userErr) {
-                logger.error('Erro ao marcar usuário como inativo (fallback):', userErr)
+            // Fallback: delegar para utilitário administrativo que aplica todas as mudanças
+            const ok = await adminDeactivateUser(userId)
+            if (!ok) {
+                logger.error('adminDeactivateUser retornou falso para userId:', userId)
                 return false
             }
-
-            logger.info('Usuário desativado com sucesso (fallback):', userId)
+            logger.info('Usuário desativado com sucesso via adminDeactivateUser:', userId)
             return true
         } catch (error) {
             logger.error('Erro inesperado ao desativar usuário:', error)

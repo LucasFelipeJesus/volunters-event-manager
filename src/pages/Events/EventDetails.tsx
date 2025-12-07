@@ -211,7 +211,7 @@ export const EventDetails: React.FC = () => {
         } finally {
             setLoading(false)
         }
-    }, [id])
+    }, [id, user?.role])
 
     useEffect(() => {
         if (id) {
@@ -333,7 +333,7 @@ export const EventDetails: React.FC = () => {
 
             // Se status foi alterado para 'completed', inativar todos os membros das equipes do evento
             if (editData.status === 'completed' && event?.teams?.length) {
-                const teamIds = filterValidUUIDs(event.teams.map((t: any) => t.id))
+                const teamIds = filterValidUUIDs(event.teams.map((t: ExtendedTeam) => t.id))
                 // Atualiza todos os membros ativos dessas equipes para 'inactive' e registra saída
                 if (teamIds.length > 0) {
                     const { error: membersError } = await supabase
@@ -1051,23 +1051,37 @@ export const EventDetails: React.FC = () => {
                                             <div className="space-y-2">
                                                 <h4 className="text-sm font-medium text-gray-700">Membros:</h4>
                                                 <div className="space-y-2">
-                                                    {team.members.filter(member => member.status === 'active').map((member) => (
-                                                        <div key={member.id} className="flex items-center justify-between bg-gray-50 rounded-lg p-3">
-                                                            <div className="flex items-center space-x-3">
-                                                                <div>
-                                                                    <p className="font-medium text-gray-900">{member.user?.full_name}</p>
-                                                                    <p className="text-sm text-gray-600">{member.user?.email}</p>
+                                                    {(() => {
+                                                        const visible = (team.members || [])
+                                                            .filter(member => member.status === 'active')
+                                                            .slice()
+                                                            .sort((a: ExtendedTeamMember, b: ExtendedTeamMember) => {
+                                                                if (a.role_in_team === 'captain' && b.role_in_team !== 'captain') return -1
+                                                                if (b.role_in_team === 'captain' && a.role_in_team !== 'captain') return 1
+                                                                const da = new Date(a.joined_at || 0).getTime()
+                                                                const db = new Date(b.joined_at || 0).getTime()
+                                                                if (da !== db) return da - db
+                                                                return (a.user?.full_name || '').toLowerCase().localeCompare((b.user?.full_name || '').toLowerCase())
+                                                            })
+
+                                                        return visible.map((member) => (
+                                                            <div key={member.id} className="flex items-center justify-between bg-gray-50 rounded-lg p-3">
+                                                                <div className="flex items-center space-x-3">
+                                                                    <div>
+                                                                        <p className="font-medium text-gray-900">{member.user?.full_name}</p>
+                                                                        <p className="text-sm text-gray-600">{member.user?.email}</p>
+                                                                    </div>
+                                                                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${member.role_in_team === 'captain' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>{member.role_in_team === 'captain' ? 'Capitão' : 'Voluntário'}</span>
                                                                 </div>
-                                                                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${member.role_in_team === 'captain' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>{member.role_in_team === 'captain' ? 'Capitão' : 'Voluntário'}</span>
+                                                                {/* Bloquear remoção se evento finalizado */}
+                                                                {canEdit && member.role_in_team !== 'captain' && event.status !== 'completed' && (
+                                                                    <button onClick={() => handleRemoveVolunteer(team.id, member.id)} className="p-1 text-red-600 hover:text-red-700 hover:bg-red-50 rounded" title="Remover voluntário">
+                                                                        <UserMinus className="w-4 h-4" />
+                                                                    </button>
+                                                                )}
                                                             </div>
-                                                            {/* Bloquear remoção se evento finalizado */}
-                                                            {canEdit && member.role_in_team !== 'captain' && event.status !== 'completed' && (
-                                                                <button onClick={() => handleRemoveVolunteer(team.id, member.id)} className="p-1 text-red-600 hover:text-red-700 hover:bg-red-50 rounded" title="Remover voluntário">
-                                                                    <UserMinus className="w-4 h-4" />
-                                                                </button>
-                                                            )}
-                                                        </div>
-                                                    ))}
+                                                        ))
+                                                    })()}
                                                 </div>
                                             </div>
                                         )}

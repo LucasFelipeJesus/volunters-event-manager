@@ -41,6 +41,7 @@ interface Team {
         id: string
         role_in_team: string
         status: string
+        joined_at?: string
         user: {
             id: string
             full_name: string
@@ -314,7 +315,7 @@ export const TeamsManagement: React.FC = () => {
                 <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
                     <div className="text-2xl font-bold text-purple-600">
                             {teams.reduce((sum, team) => {
-                                const active = (team.members || []).filter((m: any) => m.status === 'active' || m.status === 'confirmed').length || 0
+                                const active = (team.members || []).filter((m: Team['members'][number]) => m.status === 'active' || m.status === 'confirmed').length || 0
                                 return sum + active
                             }, 0)}
                         </div>
@@ -367,11 +368,15 @@ export const TeamsManagement: React.FC = () => {
                                             </div>
                                             <div className="flex items-center space-x-1">
                                                 <User className="w-4 h-4" />
-                                                <span>Capitão: {team.captain?.full_name}</span>
+                                                {(() => {
+                                                    const captainMember = team.members?.find((m: Team['members'][number]) => (m.role_in_team === 'captain') && (m.status === 'active' || m.status === 'confirmed'))
+                                                    const captainName = captainMember?.user?.full_name || team.captain?.full_name || '—'
+                                                    return <span>Capitão: {captainName}</span>
+                                                })()}
                                             </div>
                                             <div className="flex items-center space-x-1">
                                                 <Users className="w-4 h-4" />
-                                                <span>{(team.members || []).filter((m: any) => m.status === 'active' || m.status === 'confirmed').length}/{team.max_volunteers} membros</span>
+                                                <span>{(team.members || []).filter((m: Team['members'][number]) => m.status === 'active' || m.status === 'confirmed').length}/{team.max_volunteers} membros</span>
                                             </div>
                                             {(() => {
                                                 const formatTime = (t?: string | null) => t ? String(t).slice(0, 5) : ''
@@ -388,10 +393,18 @@ export const TeamsManagement: React.FC = () => {
                                         {/* Membros da equipe (apenas ativos) */}
                                         <div className="mt-3">
                                             <div className="flex flex-wrap gap-2">
-                                                {team.members
-                                                    ?.filter((member) => member.status === 'active' || member.status === 'confirmed')
-                                                    .slice(0, 5)
-                                                    .map((member) => (
+                                                {(() => {
+                                                    const visible = (team.members || [])
+                                                        .filter((member) => member.status === 'active' || member.status === 'confirmed')
+                                                        .sort((a: Team['members'][number], b: Team['members'][number]) => {
+                                                            if (a.role_in_team === 'captain' && b.role_in_team !== 'captain') return -1
+                                                            if (b.role_in_team === 'captain' && a.role_in_team !== 'captain') return 1
+                                                            const ja = new Date(a.joined_at || 0).getTime()
+                                                            const jb = new Date(b.joined_at || 0).getTime()
+                                                            if (ja !== jb) return ja - jb
+                                                            return (a.user.full_name || '').toLowerCase().localeCompare((b.user.full_name || '').toLowerCase())
+                                                        })
+                                                    return visible.slice(0, 5).map((member) => (
                                                         <span
                                                             key={member.id}
                                                             className={`inline-flex items-center px-2 py-1 rounded-full text-xs ${member.role_in_team === 'captain'
@@ -402,7 +415,8 @@ export const TeamsManagement: React.FC = () => {
                                                             {member.user.full_name}
                                                             {member.role_in_team === 'captain' && ' (Cap.)'}
                                                         </span>
-                                                    ))}
+                                                    ))
+                                                })()}
                                                 {team.members &&
                                                     team.members.filter((member) => member.status === 'active' || member.status === 'confirmed').length > 5 && (
                                                         <span className="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600">

@@ -58,13 +58,14 @@ interface Team {
 export const EditTeam: React.FC = () => {
   // Hooks de estado principais SEMPRE primeiro
   const { id } = useParams<{ id: string }>();
-  const { user } = useAuth();
+  const { user, promoteUser } = useAuth();
   const navigate = useNavigate();
 
   const [team, setTeam] = useState<Team | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [inconsistencyWarning, setInconsistencyWarning] = useState<string | null>(null);
 
   // Estados para edição
   const [editData, setEditData] = useState({
@@ -74,6 +75,9 @@ export const EditTeam: React.FC = () => {
     arrival_time: '',
     status: 'forming'
   });
+
+  // Estado para escolha de capitão na edição
+  const [selectedCaptainId, setSelectedCaptainId] = useState<string | null>(null);
 
   // Estado para voluntários disponíveis
   const [availableVolunteers, setAvailableVolunteers] = useState<UserProfile[]>([]);
@@ -208,6 +212,29 @@ export const EditTeam: React.FC = () => {
       if (teamError) throw teamError
 
       setTeam(teamData)
+      // Preferir o papel registrado em team_members (role_in_team) como fonte da verdade
+      const captainFromMembers = teamData?.members?.find((m: any) => m.role_in_team === 'captain' && m.status === 'active')?.user_id
+
+      // Verificar consistência entre teams.captain_id e team_members
+      const captainIdInTeamsTable = teamData?.captain_id || null
+      const captainIdHasMemberRecord = !!teamData?.members?.some((m: any) => m.user_id === captainIdInTeamsTable && m.role_in_team === 'captain' && m.status === 'active')
+
+      if (captainFromMembers) {
+        setSelectedCaptainId(captainFromMembers)
+        setInconsistencyWarning(null)
+      } else if (captainIdInTeamsTable && captainIdHasMemberRecord) {
+        // fallback: teams.captain_id aponta para um membro marcado como captain
+        setSelectedCaptainId(captainIdInTeamsTable)
+        setInconsistencyWarning(null)
+      } else {
+        // Não encontramos capitão ativo em team_members e teams.captain_id não é consistente
+        setSelectedCaptainId(null)
+        if (captainIdInTeamsTable) {
+          setInconsistencyWarning('Inconsistência detectada: `teams.captain_id` aponta para usuário que não é capitão em `team_members`.')
+        } else {
+          setInconsistencyWarning(null)
+        }
+      }
       setEditData({
         name: teamData.name,
         description: teamData.description || '',
@@ -256,21 +283,57 @@ export const EditTeam: React.FC = () => {
       }
 
       // Atualizar equipe
+      const updatePayload: any = {
+        name: editData.name,
+        description: editData.description,
+        max_volunteers: editData.max_volunteers,
+        arrival_time: editData.arrival_time || null,
+        status: editData.status,
+        updated_at: new Date().toISOString()
+      }
+      if (selectedCaptainId !== null) updatePayload.captain_id = selectedCaptainId
+
       const { error: updateError } = await supabase
         .from('teams')
-        .update({
-          name: editData.name,
-          description: editData.description,
-          max_volunteers: editData.max_volunteers,
-          arrival_time: editData.arrival_time || null,
-          status: editData.status,
-          updated_at: new Date().toISOString()
-        })
+        .update(updatePayload)
         .eq('id', id)
 
       if (updateError) throw updateError
 
       setSuccess('Equipe atualizada com sucesso!')
+      // Se capitão alterado, garantir role_in_team e atualizar membros correspondentes
+      try {
+        // Obter membro atualmente marcado como capitão, se houver
+        const { data: currentCaptainMember } = await supabase
+          .from('team_members')
+          .select('*')
+          .eq('team_id', id)
+          .eq('role_in_team', 'captain')
+          .maybeSingle()
+
+        if (currentCaptainMember && currentCaptainMember.user_id !== selectedCaptainId) {
+          await supabase.from('team_members').update({ role_in_team: 'volunteer' }).eq('id', currentCaptainMember.id)
+        }
+
+        if (selectedCaptainId) {
+          // Verificar se selectedCaptainId já é membro desta equipe
+          const { data: existingMember } = await supabase
+            .from('team_members')
+            .select('*')
+            .eq('team_id', id)
+            .eq('user_id', selectedCaptainId)
+            .maybeSingle()
+
+          if (existingMember) {
+            await supabase.from('team_members').update({ role_in_team: 'captain', status: 'active' }).eq('id', existingMember.id)
+          } else {
+            // Inserir como membro capitão
+            await supabase.from('team_members').insert({ team_id: id, user_id: selectedCaptainId, role_in_team: 'captain', status: 'active', joined_at: new Date().toISOString() })
+          }
+        }
+      } catch (err) {
+        console.error('Erro ao sincronizar capitão na equipe:', err)
+      }
       await fetchTeamDetails() // Recarregar dados
 
     } catch (error: unknown) {
@@ -414,8 +477,11 @@ export const EditTeam: React.FC = () => {
   // Não permitir edição se o evento associado já estiver finalizado
   const eventIsCompleted = team?.event?.status === 'completed'
 
-  const canEdit = !eventIsCompleted && (user?.role === 'admin' || 
-                  (user?.role === 'captain' && team?.captain_id === user?.id) ||
+  // Verifica se o usuário é capitão segundo registro em team_members
+  const isCaptainInTeam = !!team?.members?.some(m => m.user_id === user?.id && m.role_in_team === 'captain')
+
+  const canEdit = !eventIsCompleted && (user?.role === 'admin' ||
+    (user?.role === 'captain' && (isCaptainInTeam || team?.captain_id === user?.id)) ||
     (user?.role === 'captain' && team?.event?.admin_id === user?.id))
 
   if (loading) {
@@ -438,7 +504,22 @@ export const EditTeam: React.FC = () => {
     )
   }
 
-  const activeMembers = team.members?.filter(m => m.status === 'active') || []
+  const activeMembers = (team.members || [])
+    .filter(m => m.status === 'active' || m.status === 'confirmed')
+    .slice()
+    .sort((a: any, b: any) => {
+      // Capitão primeiro
+      if (a.role_in_team === 'captain' && b.role_in_team !== 'captain') return -1
+      if (b.role_in_team === 'captain' && a.role_in_team !== 'captain') return 1
+      // Depois por data de entrada
+      const da = new Date(a.joined_at || 0).getTime()
+      const db = new Date(b.joined_at || 0).getTime()
+      if (da !== db) return da - db
+      // Por nome como fallback
+      const na = (a.user?.full_name || '').toLowerCase()
+      const nb = (b.user?.full_name || '').toLowerCase()
+      return na.localeCompare(nb)
+    })
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
@@ -516,6 +597,15 @@ export const EditTeam: React.FC = () => {
         </div>
       )}
 
+      {inconsistencyWarning && (
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+          <div className="flex items-center space-x-2">
+            <AlertCircle className="w-5 h-5 text-yellow-600" />
+            <p className="text-yellow-800">{inconsistencyWarning}</p>
+          </div>
+        </div>
+      )}
+
       {success && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-4">
           <div className="flex items-center space-x-2">
@@ -560,6 +650,76 @@ export const EditTeam: React.FC = () => {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Capitão da Equipe</label>
+                    <select
+                      title="Capitão da equipe"
+                      value={selectedCaptainId || ''}
+                      onChange={async (e) => {
+                        const val = e.target.value || null
+                        if (!val) {
+                          setSelectedCaptainId(null)
+                          return
+                        }
+
+                        // Encontrar membro selecionado
+                        const member = team?.members?.find(m => m.user_id === val)
+                        // Se o membro existe e não tem role 'captain', oferecer promoção (apenas admin)
+                        if (member && member.user && member.user.role !== 'captain' && user?.role === 'admin') {
+                          const ok = window.confirm(`Usuário ${member.user.full_name} não possui perfil de capitão. Deseja promovê-lo a capitão?`)
+                          if (!ok) return
+                          try {
+                            setLoading(true)
+                            const promoted = await promoteUser(val)
+                            if (!promoted) {
+                              setError('Falha ao promover usuário a capitão. Verifique os logs.')
+                              return
+                            }
+                            setSuccess('Usuário promovido a capitão com sucesso.')
+                            // Atualizar estado local da equipe para refletir promoção imediatamente
+                            setTeam(prev => {
+                              if (!prev) return prev
+                              // Atualizar ou inserir membro com role_in_team = 'captain'
+                              const members = Array.isArray(prev.members) ? [...prev.members] : []
+                              const idx = members.findIndex((mm: any) => mm.user_id === val)
+                              if (idx !== -1) {
+                                members[idx] = { ...members[idx], role_in_team: 'captain', status: 'active', user: { ...members[idx].user, role: 'captain' } }
+                              } else {
+                                // Inserir entrada temporária - id fictício até salvar
+                                members.push({ id: `tmp-${val}`, user_id: val, team_id: prev.id, role_in_team: 'captain', status: 'active', joined_at: new Date().toISOString(), user: { id: val, full_name: member.user?.full_name || '', email: member.user?.email || '', role: 'captain' } })
+                              }
+                              return { ...prev, members, captain_id: val }
+                            })
+                            setSelectedCaptainId(val)
+                            setInconsistencyWarning(null)
+                          } catch (err) {
+                            console.error('Erro ao promover usuário:', err)
+                            setError('Erro ao promover usuário a capitão.')
+                          } finally {
+                            setLoading(false)
+                          }
+                        } else {
+                          setSelectedCaptainId(val)
+                        }
+                      }}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="">Nenhum</option>
+                      {/* Mostrar primeiro membros que já são capitães (fonte da verdade = team_members.role_in_team) */}
+                      {team?.members?.filter(m => (m.status === 'active' || m.status === 'confirmed') && m.user?.role === 'captain').map(m => (
+                        <option key={m.user_id} value={m.user_id}>{m.user?.full_name || m.user_id} (Capitão)</option>
+                      ))}
+
+                      {/* Opção para admins: permitir promover voluntários existentes na equipe */}
+                      {user?.role === 'admin' && (
+                        <optgroup label="Voluntários (promover)">
+                          {team?.members?.filter(m => (m.status === 'active' || m.status === 'confirmed') && m.user?.role !== 'captain').map(m => (
+                            <option key={m.user_id} value={m.user_id}>{m.user?.full_name || m.user_id} (Voluntário)</option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-2">Máximo de Voluntários</label>
                     <input
