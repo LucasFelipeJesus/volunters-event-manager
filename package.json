@@ -5,6 +5,8 @@
   "type": "module",
   "homepage": "https://LucasFelipeJesus.github.io/volunters-event-manager",
   "scripts": {
+    "prestart": "npm run build",
+    "start": "node server/index.js",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist",
     "dev": "vite",
@@ -14,6 +16,7 @@
     "setup-admin": "node -e \"console.log('🚀 Para configurar o administrador inicial:'); console.log('1. Execute: npx supabase migration up'); console.log('2. Acesse o Dashboard do Supabase'); console.log('3. Vá para Authentication > Users'); console.log('4. Crie usuário: admin@sistema.com'); console.log('5. Consulte SETUP-INICIAL.md para detalhes'); console.log(''); console.log('💡 Ou execute o script interativo em src/utils/adminSetup.ts');\""
   },
   "dependencies": {
+    "express": "^4.18.2",
     "@alloc/quick-lru": "^5.2.0",
     "@hookform/resolvers": "^5.1.1",
     "@supabase/supabase-js": "^2.51.0",
